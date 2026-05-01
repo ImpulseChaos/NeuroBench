@@ -1,0 +1,2527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NeuroBench — Cognitive Performance Suite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+/* ============================================================
+   CSS CUSTOM PROPERTIES
+   ============================================================ */
+:root {
+  --bg:          #0A0E1A;
+  --surface:     #111827;
+  --border:      #1F2937;
+  --text:        #F9FAFB;
+  --muted:       #6B7280;
+  --reaction:    #10B981;
+  --typing:      #3B82F6;
+  --aim:         #F59E0B;
+  --sequence:    #8B5CF6;
+  --error:       #EF4444;
+  --result-hl:   #F1F5F9;
+  --font-display:'Syne', sans-serif;
+  --font-mono:   'JetBrains Mono', monospace;
+  --radius:      12px;
+  --radius-lg:   20px;
+  --trans:       0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { cursor: pointer; border: none; background: none; font-family: inherit; }
+
+/* ============================================================
+   SCANLINE CRT OVERLAY
+   ============================================================ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Subtle grid overlay on background */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ============================================================
+   SCREEN ROUTING
+   ============================================================ */
+#app { width: 100%; min-height: 100vh; position: relative; }
+
+.screen {
+  position: absolute;
+  inset: 0;
+  min-height: 100vh;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(20px);
+  transition: opacity var(--trans), transform var(--trans);
+  z-index: 1;
+}
+
+.screen.active {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateY(0);
+}
+
+/* Three.js canvas backdrop for each test screen */
+.bg-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+#dashboard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 24px 40px;
+  min-height: 100vh;
+  z-index: 1;
+}
+
+.dash-header {
+  text-align: center;
+  margin-bottom: 60px;
+}
+
+.dash-logo {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--text) 0%, var(--muted) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+.dash-tagline {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-top: 12px;
+}
+
+.test-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  width: 100%;
+  max-width: 900px;
+  margin-bottom: 40px;
+}
+
+.test-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  cursor: pointer;
+  transition: all var(--trans);
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+}
+
+.test-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--accent-color, transparent) 0%, transparent 70%);
+  opacity: 0.04;
+  transition: opacity var(--trans);
+}
+
+.test-card:hover::before { opacity: 0.08; }
+
+.test-card:hover {
+  border-color: var(--accent-color, var(--border));
+  box-shadow: 0 0 0 1px var(--accent-color, transparent),
+              0 0 30px rgba(var(--accent-rgb, 0,0,0), 0.15),
+              0 8px 32px rgba(0,0,0,0.4);
+  transform: translateY(-4px);
+}
+
+.test-card.reaction  { --accent-color: var(--reaction);  --accent-rgb: 16,185,129; }
+.test-card.typing    { --accent-color: var(--typing);    --accent-rgb: 59,130,246; }
+.test-card.aim       { --accent-color: var(--aim);       --accent-rgb: 245,158,11; }
+.test-card.sequence  { --accent-color: var(--sequence);  --accent-rgb: 139,92,246; }
+
+.card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  font-size: 1.5rem;
+  background: rgba(var(--accent-rgb, 255,255,255), 0.1);
+  border: 1px solid rgba(var(--accent-rgb, 255,255,255), 0.2);
+}
+
+.card-title {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.card-desc {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.card-score {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.card-score-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.card-score-value {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--accent-color, var(--text));
+}
+
+.card-arrow {
+  position: absolute;
+  top: 32px;
+  right: 32px;
+  color: var(--muted);
+  font-size: 1.2rem;
+  transition: transform var(--trans), color var(--trans);
+}
+
+.test-card:hover .card-arrow {
+  transform: translate(4px, -4px);
+  color: var(--accent-color, var(--text));
+}
+
+/* Stats panel on dashboard */
+.stats-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  width: 100%;
+  max-width: 900px;
+}
+
+.stats-panel-title {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 20px;
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.stat-item { text-align: center; }
+
+.stat-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.stat-item.reaction .stat-value  { color: var(--reaction); }
+.stat-item.typing   .stat-value  { color: var(--typing); }
+.stat-item.aim      .stat-value  { color: var(--aim); }
+.stat-item.sequence .stat-value  { color: var(--sequence); }
+
+/* ============================================================
+   TEST SCREEN SHARED LAYOUT
+   ============================================================ */
+.test-screen-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0;
+}
+
+.test-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  background: rgba(10,14,26,0.7);
+  backdrop-filter: blur(20px);
+}
+
+.back-btn {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  transition: all var(--trans);
+  letter-spacing: 0.05em;
+}
+
+.back-btn:hover {
+  color: var(--text);
+  border-color: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.07);
+}
+
+.test-topbar-title {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.reset-btn {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  transition: all var(--trans);
+  letter-spacing: 0.05em;
+}
+
+.reset-btn:hover {
+  color: var(--text);
+  border-color: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.07);
+}
+
+.test-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  gap: 32px;
+}
+
+/* ============================================================
+   ACTION BUTTON (primary CTA per test)
+   ============================================================ */
+.action-btn {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 14px 40px;
+  border-radius: 10px;
+  border: 1px solid;
+  letter-spacing: 0.05em;
+  transition: all var(--trans);
+  text-transform: uppercase;
+}
+
+.action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(var(--btn-rgb, 0,0,0), 0.3);
+}
+
+.action-btn.reaction-btn {
+  --btn-rgb: 16,185,129;
+  background: rgba(16,185,129,0.15);
+  border-color: var(--reaction);
+  color: var(--reaction);
+}
+
+.action-btn.typing-btn {
+  --btn-rgb: 59,130,246;
+  background: rgba(59,130,246,0.15);
+  border-color: var(--typing);
+  color: var(--typing);
+}
+
+.action-btn.aim-btn {
+  --btn-rgb: 245,158,11;
+  background: rgba(245,158,11,0.15);
+  border-color: var(--aim);
+  color: var(--aim);
+}
+
+.action-btn.sequence-btn {
+  --btn-rgb: 139,92,246;
+  background: rgba(139,92,246,0.15);
+  border-color: var(--sequence);
+  color: var(--sequence);
+}
+
+/* ============================================================
+   REACTION TEST
+   ============================================================ */
+#reaction { background: var(--bg); }
+
+.reaction-zone {
+  width: min(500px, 90vw);
+  height: 300px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  transition: all 0.15s ease;
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.reaction-zone[data-state="idle"] {
+  border-color: var(--border);
+}
+
+.reaction-zone[data-state="countdown"] {
+  border-color: var(--muted);
+  background: rgba(17,24,39,0.8);
+}
+
+.reaction-zone[data-state="waiting"] {
+  border-color: var(--error);
+  background: rgba(239,68,68,0.08);
+  box-shadow: 0 0 40px rgba(239,68,68,0.15), inset 0 0 60px rgba(239,68,68,0.05);
+  animation: pulse-red 1s ease-in-out infinite;
+}
+
+.reaction-zone[data-state="active"] {
+  border-color: var(--reaction);
+  background: rgba(16,185,129,0.12);
+  box-shadow: 0 0 60px rgba(16,185,129,0.3), inset 0 0 80px rgba(16,185,129,0.08);
+  cursor: crosshair;
+}
+
+.reaction-zone[data-state="result"] {
+  border-color: var(--reaction);
+  background: var(--surface);
+}
+
+.reaction-zone[data-state="false-start"] {
+  border-color: var(--error);
+  background: rgba(239,68,68,0.15);
+  box-shadow: 0 0 40px rgba(239,68,68,0.3);
+}
+
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 40px rgba(239,68,68,0.15), inset 0 0 60px rgba(239,68,68,0.05); }
+  50% { box-shadow: 0 0 60px rgba(239,68,68,0.3), inset 0 0 80px rgba(239,68,68,0.1); }
+}
+
+.reaction-state-text {
+  font-family: var(--font-display);
+  font-size: clamp(1.2rem, 4vw, 2rem);
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+}
+
+.reaction-time-display {
+  font-family: var(--font-mono);
+  font-size: clamp(2.5rem, 8vw, 5rem);
+  font-weight: 600;
+  color: var(--reaction);
+  pointer-events: none;
+  display: none;
+}
+
+.reaction-hint {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 12px;
+  pointer-events: none;
+}
+
+.reaction-stats-row {
+  display: flex;
+  gap: 40px;
+  justify-content: center;
+}
+
+.r-stat {
+  text-align: center;
+}
+
+.r-stat-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 4px;
+}
+
+.r-stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--reaction);
+}
+
+/* ============================================================
+   TYPING TEST
+   ============================================================ */
+#typing { background: var(--bg); }
+
+.typing-meta {
+  display: flex;
+  gap: 48px;
+  align-items: center;
+}
+
+.typing-timer {
+  font-family: var(--font-display);
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--typing);
+  min-width: 3ch;
+  text-align: center;
+}
+
+.typing-wpm {
+  text-align: center;
+}
+
+.typing-wpm-val {
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.typing-wpm-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.typing-accuracy {
+  text-align: center;
+}
+
+.typing-acc-val {
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.typing-acc-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.typing-text-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  width: min(800px, 92vw);
+  position: relative;
+  font-size: 1.15rem;
+  line-height: 1.9;
+  letter-spacing: 0.02em;
+  cursor: text;
+}
+
+.typing-text-box.active {
+  border-color: rgba(59,130,246,0.4);
+  box-shadow: 0 0 0 1px rgba(59,130,246,0.2);
+}
+
+.char {
+  position: relative;
+  color: var(--muted);
+  transition: color 0.05s;
+}
+
+.char.correct { color: var(--typing); }
+.char.wrong { color: var(--error); text-decoration: underline wavy var(--error); }
+.char.current { color: var(--text); }
+
+.char.current::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--typing);
+  border-radius: 1px;
+  animation: blink-cursor 0.8s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.typing-input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+
+.typing-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(17,24,39,0.85);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(4px);
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+  transition: opacity var(--trans);
+}
+
+.typing-results {
+  display: none;
+  text-align: center;
+  width: min(600px, 90vw);
+}
+
+.typing-results-wpm {
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 10vw, 6rem);
+  font-weight: 800;
+  color: var(--typing);
+  line-height: 1;
+}
+
+.typing-results-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-top: 8px;
+  margin-bottom: 32px;
+}
+
+.typing-results-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.tr-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.tr-item-val {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--typing);
+  margin-bottom: 4px;
+}
+
+.tr-item-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ============================================================
+   AIM TEST
+   ============================================================ */
+#aim { background: var(--bg); }
+
+.aim-meta {
+  display: flex;
+  gap: 48px;
+  align-items: center;
+  justify-content: center;
+}
+
+.aim-stat {
+  text-align: center;
+}
+
+.aim-stat-val {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--aim);
+}
+
+.aim-stat-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.aim-arena {
+  width: min(700px, 92vw);
+  height: min(420px, 55vh);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.aim-arena.active { border-color: rgba(245,158,11,0.35); }
+
+.aim-arena-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  background: rgba(17,24,39,0.75);
+  backdrop-filter: blur(4px);
+  transition: opacity var(--trans);
+}
+
+.aim-target {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--aim) 0%, rgba(245,158,11,0.6) 60%, transparent 100%);
+  border: 2px solid var(--aim);
+  cursor: crosshair;
+  transform: translate(-50%, -50%) scale(0);
+  animation: target-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  transition: box-shadow 0.1s;
+  box-shadow: 0 0 20px rgba(245,158,11,0.4), inset 0 0 10px rgba(245,158,11,0.2);
+}
+
+.aim-target:hover {
+  box-shadow: 0 0 30px rgba(245,158,11,0.7), inset 0 0 15px rgba(245,158,11,0.3);
+}
+
+@keyframes target-in {
+  to { transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes target-out {
+  to { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+}
+
+.miss-flash {
+  position: absolute;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  background: radial-gradient(circle, rgba(239,68,68,0.5) 0%, transparent 70%);
+  transform: translate(-50%, -50%) scale(0);
+  animation: miss-anim 0.4s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes miss-anim {
+  0% { transform: translate(-50%,-50%) scale(0); opacity: 1; }
+  100% { transform: translate(-50%,-50%) scale(3); opacity: 0; }
+}
+
+.aim-progress-bar {
+  width: min(700px, 92vw);
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.aim-progress-fill {
+  height: 100%;
+  background: var(--aim);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.2s ease;
+  box-shadow: 0 0 8px var(--aim);
+}
+
+.aim-results {
+  display: none;
+  text-align: center;
+  width: min(600px, 90vw);
+}
+
+.aim-results-score {
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 10vw, 6rem);
+  font-weight: 800;
+  color: var(--aim);
+  line-height: 1;
+}
+
+.aim-results-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-top: 8px;
+  margin-bottom: 32px;
+}
+
+.aim-results-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.ar-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.ar-item-val {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--aim);
+  margin-bottom: 4px;
+}
+
+.ar-item-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ============================================================
+   SEQUENCE TEST
+   ============================================================ */
+#sequence { background: var(--bg); }
+
+.seq-level-display {
+  text-align: center;
+}
+
+.seq-level-val {
+  font-family: var(--font-display);
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--sequence);
+  line-height: 1;
+}
+
+.seq-level-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-top: 6px;
+}
+
+.seq-status {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+  height: 1.2em;
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
+.seq-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  width: min(360px, 92vw);
+}
+
+.seq-btn {
+  height: 130px;
+  border-radius: var(--radius-lg);
+  border: 2px solid transparent;
+  transition: all 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.seq-btn[data-index="0"] { background: rgba(139,92,246,0.12); border-color: rgba(139,92,246,0.3); }
+.seq-btn[data-index="1"] { background: rgba(59,130,246,0.12); border-color: rgba(59,130,246,0.3); }
+.seq-btn[data-index="2"] { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.3); }
+.seq-btn[data-index="3"] { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
+
+.seq-btn.lit[data-index="0"] {
+  background: rgba(139,92,246,0.5);
+  border-color: var(--sequence);
+  box-shadow: 0 0 40px rgba(139,92,246,0.6), inset 0 0 30px rgba(139,92,246,0.3);
+}
+
+.seq-btn.lit[data-index="1"] {
+  background: rgba(59,130,246,0.5);
+  border-color: var(--typing);
+  box-shadow: 0 0 40px rgba(59,130,246,0.6), inset 0 0 30px rgba(59,130,246,0.3);
+}
+
+.seq-btn.lit[data-index="2"] {
+  background: rgba(16,185,129,0.5);
+  border-color: var(--reaction);
+  box-shadow: 0 0 40px rgba(16,185,129,0.6), inset 0 0 30px rgba(16,185,129,0.3);
+}
+
+.seq-btn.lit[data-index="3"] {
+  background: rgba(245,158,11,0.5);
+  border-color: var(--aim);
+  box-shadow: 0 0 40px rgba(245,158,11,0.6), inset 0 0 30px rgba(245,158,11,0.3);
+}
+
+.seq-btn:not([disabled]):hover {
+  filter: brightness(1.3);
+  transform: scale(1.03);
+}
+
+.seq-btn:not([disabled]):active { transform: scale(0.97); }
+
+.seq-btn[disabled] { cursor: not-allowed; }
+
+.seq-progress {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.seq-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.seq-dot.filled {
+  background: var(--sequence);
+  box-shadow: 0 0 6px var(--sequence);
+}
+
+.seq-results {
+  display: none;
+  text-align: center;
+  width: min(500px, 90vw);
+}
+
+.seq-results-level {
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 10vw, 6rem);
+  font-weight: 800;
+  color: var(--sequence);
+  line-height: 1;
+}
+
+.seq-results-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-top: 8px;
+  margin-bottom: 32px;
+}
+
+/* ============================================================
+   RESULT PANELS (shared)
+   ============================================================ */
+.result-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  text-align: center;
+  animation: result-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes result-in {
+  from { transform: scale(0.85); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+/* ============================================================
+   COUNTDOWN OVERLAY (shared)
+   ============================================================ */
+.countdown-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  background: rgba(10,14,26,0.8);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.countdown-overlay.show {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.countdown-number {
+  font-family: var(--font-display);
+  font-size: 8rem;
+  font-weight: 800;
+  animation: countdown-pop 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes countdown-pop {
+  from { transform: scale(2); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* ============================================================
+   ANIMATIONS & TRANSITIONS
+   ============================================================ */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes count-up-glow {
+  0%   { text-shadow: none; }
+  50%  { text-shadow: 0 0 30px currentColor; }
+  100% { text-shadow: none; }
+}
+
+.glow-animate { animation: count-up-glow 0.6s ease; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 640px) {
+  .test-grid { grid-template-columns: 1fr; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .reaction-stats-row { gap: 20px; }
+  .typing-meta { gap: 24px; }
+  .aim-meta { gap: 20px; }
+  .seq-grid { width: min(300px, 90vw); }
+  .seq-btn { height: 100px; }
+  .test-topbar { padding: 16px 20px; }
+  .test-body { padding: 24px 16px; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ========================================================
+       DASHBOARD
+       ======================================================== -->
+  <section id="dashboard" class="screen active">
+    <div class="dash-header">
+      <div class="dash-logo">NeuroBench</div>
+      <div class="dash-tagline">Cognitive Performance Suite</div>
+    </div>
+
+    <div class="test-grid">
+      <div class="test-card reaction" onclick="Router.go('reaction')">
+        <span class="card-arrow">↗</span>
+        <div class="card-icon">⚡</div>
+        <div class="card-title">Reaction Speed</div>
+        <div class="card-desc">Measure your raw neural response time. Click when the signal appears. False starts penalized.</div>
+        <div class="card-score">
+          <span class="card-score-label">Best</span>
+          <span class="card-score-value" id="dash-reaction-best">—</span>
+          <span class="card-score-label">ms</span>
+        </div>
+      </div>
+
+      <div class="test-card typing" onclick="Router.go('typing')">
+        <span class="card-arrow">↗</span>
+        <div class="card-icon">⌨</div>
+        <div class="card-title">Typing Speed</div>
+        <div class="card-desc">60 seconds. Live WPM tracking, accuracy scoring, and character-by-character feedback.</div>
+        <div class="card-score">
+          <span class="card-score-label">Best</span>
+          <span class="card-score-value" id="dash-typing-best">—</span>
+          <span class="card-score-label">WPM</span>
+        </div>
+      </div>
+
+      <div class="test-card aim" onclick="Router.go('aim')">
+        <span class="card-arrow">↗</span>
+        <div class="card-icon">🎯</div>
+        <div class="card-title">Aim Trainer</div>
+        <div class="card-desc">30 targets of varying sizes. Speed and accuracy combined into a single performance score.</div>
+        <div class="card-score">
+          <span class="card-score-label">Best</span>
+          <span class="card-score-value" id="dash-aim-best">—</span>
+        </div>
+      </div>
+
+      <div class="test-card sequence" onclick="Router.go('sequence')">
+        <span class="card-arrow">↗</span>
+        <div class="card-icon">🧠</div>
+        <div class="card-title">Sequence Memory</div>
+        <div class="card-desc">Watch the pattern. Repeat it. Length grows each round. Speed escalates. How far can you go?</div>
+        <div class="card-score">
+          <span class="card-score-label">Best Level</span>
+          <span class="card-score-value" id="dash-sequence-best">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-panel">
+      <div class="stats-panel-title">Session Overview</div>
+      <div class="stats-row">
+        <div class="stat-item reaction">
+          <div class="stat-label">Avg Reaction</div>
+          <div class="stat-value" id="dash-reaction-avg">—</div>
+        </div>
+        <div class="stat-item typing">
+          <div class="stat-label">Avg WPM</div>
+          <div class="stat-value" id="dash-typing-avg">—</div>
+        </div>
+        <div class="stat-item aim">
+          <div class="stat-label">Aim Attempts</div>
+          <div class="stat-value" id="dash-aim-count">0</div>
+        </div>
+        <div class="stat-item sequence">
+          <div class="stat-label">Max Level</div>
+          <div class="stat-value" id="dash-sequence-max">—</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       REACTION TEST
+       ======================================================== -->
+  <section id="reaction" class="screen">
+    <canvas id="reaction-canvas" class="bg-canvas"></canvas>
+    <div class="test-screen-inner">
+      <div class="test-topbar">
+        <button class="back-btn" onclick="Router.go('dashboard')">← Dashboard</button>
+        <div class="test-topbar-title" style="color:var(--reaction)">Reaction Speed</div>
+        <button class="reset-btn" id="reaction-reset-btn">Reset</button>
+      </div>
+      <div class="test-body">
+        <div id="reaction-zone" class="reaction-zone" data-state="idle" onclick="ReactionTest.handleClick()">
+          <div class="reaction-state-text" id="reaction-msg">Click to Start</div>
+          <div class="reaction-time-display" id="reaction-time"></div>
+          <div class="reaction-hint" id="reaction-hint">Wait for green — then click as fast as you can</div>
+        </div>
+        <div class="reaction-stats-row">
+          <div class="r-stat">
+            <div class="r-stat-label">Last</div>
+            <div class="r-stat-value" id="reaction-stat-last">—</div>
+          </div>
+          <div class="r-stat">
+            <div class="r-stat-label">Best</div>
+            <div class="r-stat-value" id="reaction-stat-best">—</div>
+          </div>
+          <div class="r-stat">
+            <div class="r-stat-label">Average</div>
+            <div class="r-stat-value" id="reaction-stat-avg">—</div>
+          </div>
+          <div class="r-stat">
+            <div class="r-stat-label">Attempts</div>
+            <div class="r-stat-value" id="reaction-stat-count">0</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       TYPING TEST
+       ======================================================== -->
+  <section id="typing" class="screen">
+    <canvas id="typing-canvas" class="bg-canvas"></canvas>
+    <div class="test-screen-inner">
+      <div class="test-topbar">
+        <button class="back-btn" onclick="Router.go('dashboard')">← Dashboard</button>
+        <div class="test-topbar-title" style="color:var(--typing)">Typing Speed</div>
+        <button class="reset-btn" id="typing-reset-btn">Reset</button>
+      </div>
+      <div class="test-body" id="typing-body">
+        <!-- Active state -->
+        <div id="typing-active-view">
+          <div class="typing-meta">
+            <div>
+              <div class="typing-timer" id="typing-timer">60</div>
+            </div>
+            <div class="typing-wpm">
+              <div class="typing-wpm-val" id="typing-wpm-val">0</div>
+              <div class="typing-wpm-label">WPM</div>
+            </div>
+            <div class="typing-accuracy">
+              <div class="typing-acc-val" id="typing-acc-val">100</div>
+              <div class="typing-acc-label">Accuracy %</div>
+            </div>
+          </div>
+          <div class="typing-text-box" id="typing-text-box" onclick="TypingTest.focusInput()">
+            <div id="typing-chars"></div>
+            <input class="typing-input" id="typing-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <div class="typing-overlay" id="typing-overlay">Click here or press any key to begin</div>
+          </div>
+        </div>
+        <!-- Results state -->
+        <div class="typing-results" id="typing-results">
+          <div class="typing-results-wpm" id="typing-results-wpm">0</div>
+          <div class="typing-results-label">Words Per Minute</div>
+          <div class="typing-results-grid">
+            <div class="tr-item">
+              <div class="tr-item-val" id="tr-accuracy">0%</div>
+              <div class="tr-item-label">Accuracy</div>
+            </div>
+            <div class="tr-item">
+              <div class="tr-item-val" id="tr-chars">0</div>
+              <div class="tr-item-label">Correct Chars</div>
+            </div>
+            <div class="tr-item">
+              <div class="tr-item-val" id="tr-errors">0</div>
+              <div class="tr-item-label">Errors</div>
+            </div>
+          </div>
+          <button class="action-btn typing-btn" onclick="TypingTest.reset()">Try Again</button>
+        </div>
+        <!-- Idle state -->
+        <div id="typing-idle-view" style="display:none;text-align:center;gap:16px;display:none;flex-direction:column;align-items:center">
+          <button class="action-btn typing-btn" onclick="TypingTest.start()">Start Test</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       AIM TEST
+       ======================================================== -->
+  <section id="aim" class="screen">
+    <canvas id="aim-canvas" class="bg-canvas"></canvas>
+    <div class="test-screen-inner">
+      <div class="test-topbar">
+        <button class="back-btn" onclick="Router.go('dashboard')">← Dashboard</button>
+        <div class="test-topbar-title" style="color:var(--aim)">Aim Trainer</div>
+        <button class="reset-btn" id="aim-reset-btn">Reset</button>
+      </div>
+      <div class="test-body">
+        <div class="aim-meta">
+          <div class="aim-stat">
+            <div class="aim-stat-val" id="aim-hits">0/30</div>
+            <div class="aim-stat-label">Targets</div>
+          </div>
+          <div class="aim-stat">
+            <div class="aim-stat-val" id="aim-avg-time">—</div>
+            <div class="aim-stat-label">Avg ms/target</div>
+          </div>
+          <div class="aim-stat">
+            <div class="aim-stat-val" id="aim-score">0</div>
+            <div class="aim-stat-label">Score</div>
+          </div>
+        </div>
+        <!-- Arena -->
+        <div id="aim-arena" class="aim-arena" onclick="AimTest.handleArenaClick(event)">
+          <div class="aim-arena-overlay" id="aim-arena-overlay">Click to Start</div>
+        </div>
+        <div class="aim-progress-bar">
+          <div class="aim-progress-fill" id="aim-progress-fill"></div>
+        </div>
+        <!-- Results -->
+        <div class="aim-results" id="aim-results">
+          <div class="aim-results-score" id="aim-results-score">0</div>
+          <div class="aim-results-label">Performance Score</div>
+          <div class="aim-results-grid">
+            <div class="ar-item">
+              <div class="ar-item-val" id="ar-avg">—</div>
+              <div class="ar-item-label">Avg ms/click</div>
+            </div>
+            <div class="ar-item">
+              <div class="ar-item-val" id="ar-best">—</div>
+              <div class="ar-item-label">Best click</div>
+            </div>
+            <div class="ar-item">
+              <div class="ar-item-val" id="ar-total">—</div>
+              <div class="ar-item-label">Total time</div>
+            </div>
+          </div>
+          <button class="action-btn aim-btn" onclick="AimTest.reset()">Try Again</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       SEQUENCE TEST
+       ======================================================== -->
+  <section id="sequence" class="screen">
+    <canvas id="sequence-canvas" class="bg-canvas"></canvas>
+    <div class="test-screen-inner">
+      <div class="test-topbar">
+        <button class="back-btn" onclick="Router.go('dashboard')">← Dashboard</button>
+        <div class="test-topbar-title" style="color:var(--sequence)">Sequence Memory</div>
+        <button class="reset-btn" id="sequence-reset-btn">Reset</button>
+      </div>
+      <div class="test-body">
+        <div class="seq-level-display">
+          <div class="seq-level-val" id="seq-level">3</div>
+          <div class="seq-level-label">Current Level</div>
+        </div>
+        <div class="seq-status" id="seq-status">Press Start to begin</div>
+        <div class="seq-grid">
+          <button class="seq-btn" data-index="0" disabled onclick="SequenceTest.handleBtnClick(0)"></button>
+          <button class="seq-btn" data-index="1" disabled onclick="SequenceTest.handleBtnClick(1)"></button>
+          <button class="seq-btn" data-index="2" disabled onclick="SequenceTest.handleBtnClick(2)"></button>
+          <button class="seq-btn" data-index="3" disabled onclick="SequenceTest.handleBtnClick(3)"></button>
+        </div>
+        <div class="seq-progress" id="seq-progress"></div>
+        <!-- Results -->
+        <div class="seq-results" id="seq-results">
+          <div class="seq-results-level" id="seq-results-level">0</div>
+          <div class="seq-results-label">Max Level Reached</div>
+          <button class="action-btn sequence-btn" onclick="SequenceTest.reset()">Try Again</button>
+        </div>
+        <button class="action-btn sequence-btn" id="seq-start-btn" onclick="SequenceTest.start()">Start Test</button>
+      </div>
+    </div>
+  </section>
+
+</div><!-- #app -->
+
+<script>
+/* ============================================================
+   SECTION 1: CONSTANTS & GAME STATE
+   ============================================================ */
+
+const TYPING_TEXTS = [
+  "The neural pathways of the human brain form a complex network capable of processing information at speeds that modern computers still struggle to match in any meaningful way.",
+  "Precision and speed are the hallmarks of a skilled programmer who understands that clean code is not written but rather crafted through iteration and careful refinement over time.",
+  "Technology has transformed the way we communicate interact and perceive the world around us bringing both unprecedented opportunities and genuinely complex challenges to navigate.",
+  "In the deep silence of the server room ancient machines stand as witnesses to decades of computation their circuits humming quietly with the weight of accumulated data.",
+  "Quantum mechanics reveals a universe fundamentally stranger than classical physics ever imagined where particles exist in superposition until the moment of observation collapses them.",
+  "The cursor blinks patiently awaiting instruction as the developer stares at the screen searching for the elegant solution hidden somewhere within the complexity of the problem."
+];
+
+const GameState = {
+  scores: { reaction: [], typing: [], aim: [], sequence: [] },
+
+  add(test, score) {
+    this.scores[test].push(score);
+    this.updateDashboard();
+  },
+
+  getBest(test) {
+    const s = this.scores[test];
+    if (!s.length) return null;
+    // Reaction: lower is better; typing/aim/sequence: higher is better
+    return test === 'reaction' ? Math.min(...s) : Math.max(...s);
+  },
+
+  getAvg(test) {
+    const s = this.scores[test];
+    if (!s.length) return null;
+    return Math.round(s.reduce((a, b) => a + b, 0) / s.length);
+  },
+
+  updateDashboard() {
+    const fmt = (v, suffix) => v !== null ? v + (suffix||'') : '—';
+
+    const rb = this.getBest('reaction');
+    document.getElementById('dash-reaction-best').textContent = rb !== null ? rb : '—';
+    document.getElementById('dash-reaction-avg').textContent  = fmt(this.getAvg('reaction'), 'ms');
+
+    const tb = this.getBest('typing');
+    document.getElementById('dash-typing-best').textContent  = tb !== null ? tb : '—';
+    document.getElementById('dash-typing-avg').textContent   = fmt(this.getAvg('typing'));
+
+    document.getElementById('dash-aim-best').textContent     = fmt(this.getBest('aim'));
+    document.getElementById('dash-aim-count').textContent    = this.scores.aim.length;
+
+    const sb = this.getBest('sequence');
+    document.getElementById('dash-sequence-best').textContent = sb !== null ? sb : '—';
+    document.getElementById('dash-sequence-max').textContent  = sb !== null ? sb : '—';
+  }
+};
+
+/* ============================================================
+   SECTION 2: UTILITIES
+   ============================================================ */
+
+function countUp(el, target, duration) {
+  const start = performance.now();
+  const from = 0;
+  function frame(now) {
+    const p = Math.min((now - start) / duration, 1);
+    const ease = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(from + (target - from) * ease);
+    if (p < 1) requestAnimationFrame(frame);
+    else el.textContent = target;
+  }
+  requestAnimationFrame(frame);
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function rand(min, max) { return Math.random() * (max - min) + min; }
+
+/* ============================================================
+   SECTION 3: SCENE MANAGER
+   ============================================================ */
+
+class SceneManager {
+  constructor() {
+    this.renderer = null;
+    this.scene    = null;
+    this.camera   = null;
+    this.raf      = null;
+    this.canvas   = null;
+    this.objects  = [];
+    this.userData = {};  // per-scene animation state
+  }
+
+  create(canvasId, setupFn) {
+    this.canvas = document.getElementById(canvasId);
+    if (!this.canvas || !window.THREE) return;
+
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setClearColor(0x000000, 0);
+
+    this.scene  = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    this.camera.position.z = 12;
+
+    // Standard lighting
+    const ambient = new THREE.AmbientLight(0xffffff, 0.3);
+    const point1  = new THREE.PointLight(0xffffff, 0.8, 100);
+    point1.position.set(10, 10, 10);
+    const point2  = new THREE.PointLight(0xffffff, 0.4, 100);
+    point2.position.set(-10, -5, 5);
+    this.scene.add(ambient, point1, point2);
+
+    // Call the per-test setup function
+    setupFn(this);
+
+    this._onResize = () => {
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+    window.addEventListener('resize', this._onResize);
+
+    return this;
+  }
+
+  animate(updateFn) {
+    const loop = (t) => {
+      this.raf = requestAnimationFrame(loop);
+      updateFn(t * 0.001, this);
+      this.renderer.render(this.scene, this.camera);
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+
+  destroy() {
+    if (this.raf) cancelAnimationFrame(this.raf);
+    window.removeEventListener('resize', this._onResize);
+    // Dispose geometries and materials to free GPU memory
+    this.scene && this.scene.traverse(obj => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+        else obj.material.dispose();
+      }
+    });
+    if (this.renderer) {
+      this.renderer.dispose();
+      this.renderer.forceContextLoss();
+    }
+    this.renderer = this.scene = this.camera = this.raf = null;
+    this.objects = [];
+    this.userData = {};
+  }
+}
+
+/* ============================================================
+   SECTION 4: REACTION TEST
+   ============================================================ */
+
+const ReactionTest = (() => {
+  let state     = 'idle';   // idle | countdown | waiting | active | result | false-start
+  let startTime = 0;
+  let waitTimer = null;
+  let results   = [];
+  let sm        = null;     // SceneManager instance
+
+  function getZone()  { return document.getElementById('reaction-zone'); }
+  function getMsg()   { return document.getElementById('reaction-msg'); }
+  function getHint()  { return document.getElementById('reaction-hint'); }
+  function getTime()  { return document.getElementById('reaction-time'); }
+
+  function setState(s) {
+    state = s;
+    const zone = getZone();
+    if (zone) zone.setAttribute('data-state', s);
+  }
+
+  function updateStats() {
+    if (!results.length) return;
+    const best = Math.min(...results);
+    const avg  = Math.round(results.reduce((a, b) => a + b, 0) / results.length);
+    document.getElementById('reaction-stat-last').textContent  = results[results.length - 1] + 'ms';
+    document.getElementById('reaction-stat-best').textContent  = best + 'ms';
+    document.getElementById('reaction-stat-avg').textContent   = avg + 'ms';
+    document.getElementById('reaction-stat-count').textContent = results.length;
+  }
+
+  function showActive() {
+    setState('active');
+    getMsg().textContent  = 'CLICK NOW!';
+    getMsg().style.color  = 'var(--reaction)';
+    getHint().textContent = '';
+    startTime = performance.now();
+    // Trigger 3D explosion
+    if (sm && sm.userData.explode) sm.userData.explode();
+  }
+
+  function handleClick() {
+    if (state === 'idle') {
+      // Begin wait phase
+      setState('countdown');
+      getMsg().textContent  = 'Get Ready…';
+      getMsg().style.color  = '';
+      getHint().textContent = 'Don\'t click early!';
+      getTime().style.display = 'none';
+      const delay = rand(1000, 5000);
+      waitTimer = setTimeout(showActive, delay);
+
+    } else if (state === 'waiting' || state === 'countdown') {
+      // False start — clicked before green
+      clearTimeout(waitTimer);
+      setState('false-start');
+      getMsg().textContent  = 'Too Early!';
+      getMsg().style.color  = 'var(--error)';
+      getHint().textContent = 'Click to try again';
+
+    } else if (state === 'active') {
+      const elapsed = Math.round(performance.now() - startTime);
+      setState('result');
+      results.push(elapsed);
+      GameState.add('reaction', elapsed);
+
+      // Show result
+      getMsg().style.display  = 'none';
+      getTime().style.display = 'block';
+      getTime().textContent   = elapsed + 'ms';
+      getHint().textContent   = 'Click to go again';
+      updateStats();
+      getTime().classList.remove('glow-animate');
+      void getTime().offsetWidth; // reflow to restart
+      getTime().classList.add('glow-animate');
+
+    } else if (state === 'result' || state === 'false-start') {
+      // Reset for next attempt
+      setState('idle');
+      getMsg().style.display  = 'block';
+      getMsg().textContent    = 'Click to Start';
+      getMsg().style.color    = '';
+      getTime().style.display = 'none';
+      getHint().textContent   = 'Wait for green — then click as fast as you can';
+    }
+  }
+
+  function init() {
+    sm = new SceneManager();
+    sm.create('reaction-canvas', (s) => {
+      // Create floating geometric shards
+      const shards = [];
+      const colors = [0x10B981, 0x059669, 0x34D399, 0x6EE7B7];
+      for (let i = 0; i < 40; i++) {
+        const geo = new THREE.TetrahedronGeometry(rand(0.15, 0.55), 0);
+        const mat = new THREE.MeshPhongMaterial({
+          color: colors[i % colors.length],
+          emissive: 0x10B981,
+          emissiveIntensity: 0.4,
+          transparent: true,
+          opacity: rand(0.4, 0.85)
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(rand(-18, 18), rand(-12, 12), rand(-8, 0));
+        mesh.userData.vel = new THREE.Vector3(rand(-0.03, 0.03), rand(-0.03, 0.03), 0);
+        mesh.userData.rot = new THREE.Vector3(rand(0.005, 0.02), rand(0.005, 0.02), rand(0.005, 0.02));
+        mesh.userData.baseOpacity = mat.opacity;
+        s.scene.add(mesh);
+        shards.push(mesh);
+      }
+      s.objects = shards;
+
+      s.userData.explode = () => {
+        shards.forEach(shard => {
+          shard.userData.vel.set(rand(-0.25, 0.25), rand(-0.25, 0.25), 0);
+          shard.material.emissiveIntensity = 1.5;
+        });
+      };
+    });
+
+    sm.animate((t, s) => {
+      s.objects.forEach(shard => {
+        shard.position.addScaledVector(shard.userData.vel, 1);
+        shard.rotation.x += shard.userData.rot.x;
+        shard.rotation.y += shard.userData.rot.y;
+        // Dampen explode velocity
+        shard.userData.vel.multiplyScalar(0.97);
+        // Wrap bounds
+        if (shard.position.x >  20) shard.position.x = -20;
+        if (shard.position.x < -20) shard.position.x =  20;
+        if (shard.position.y >  14) shard.position.y = -14;
+        if (shard.position.y < -14) shard.position.y =  14;
+        // Fade emissive back to rest
+        if (shard.material.emissiveIntensity > 0.4)
+          shard.material.emissiveIntensity *= 0.97;
+        // Gentle pulse
+        const pulse = Math.sin(t * 1.5 + shard.position.x) * 0.1;
+        shard.material.emissiveIntensity = Math.max(0.3 + pulse, shard.material.emissiveIntensity);
+      });
+    });
+
+    document.getElementById('reaction-reset-btn').onclick = reset;
+  }
+
+  function reset() {
+    clearTimeout(waitTimer);
+    results = [];
+    setState('idle');
+    const msg  = getMsg();
+    const hint = getHint();
+    const time = getTime();
+    if (msg)  { msg.style.display = 'block'; msg.textContent = 'Click to Start'; msg.style.color = ''; }
+    if (hint) hint.textContent = 'Wait for green — then click as fast as you can';
+    if (time) { time.style.display = 'none'; }
+    ['reaction-stat-last','reaction-stat-best','reaction-stat-avg'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '—';
+    });
+    document.getElementById('reaction-stat-count').textContent = '0';
+  }
+
+  function destroy() {
+    clearTimeout(waitTimer);
+    if (sm) { sm.destroy(); sm = null; }
+  }
+
+  return { init, handleClick, reset, destroy };
+})();
+
+/* ============================================================
+   SECTION 5: TYPING TEST
+   ============================================================ */
+
+const TypingTest = (() => {
+  let state      = 'idle';  // idle | active | result
+  let startTime  = 0;
+  let timerInt   = null;
+  let text       = '';
+  let typed      = '';
+  let errors     = 0;
+  let totalTyped = 0;
+  let wpm        = 0;
+  let sm         = null;
+  let currentWPM = 0;
+
+  function getInput()   { return document.getElementById('typing-input'); }
+  function getChars()   { return document.getElementById('typing-chars'); }
+  function getOverlay() { return document.getElementById('typing-overlay'); }
+  function getTimer()   { return document.getElementById('typing-timer'); }
+  function getWPMEl()   { return document.getElementById('typing-wpm-val'); }
+  function getAccEl()   { return document.getElementById('typing-acc-val'); }
+
+  function pickText() {
+    return TYPING_TEXTS[Math.floor(Math.random() * TYPING_TEXTS.length)];
+  }
+
+  function buildChars() {
+    const container = getChars();
+    container.innerHTML = '';
+    for (let i = 0; i < text.length; i++) {
+      const span = document.createElement('span');
+      span.className = 'char' + (i === 0 ? ' current' : '');
+      span.textContent = text[i];
+      container.appendChild(span);
+    }
+  }
+
+  function updateChars() {
+    const spans = getChars().querySelectorAll('.char');
+    spans.forEach((s, i) => {
+      s.className = 'char';
+      if (i < typed.length) {
+        s.classList.add(typed[i] === text[i] ? 'correct' : 'wrong');
+      } else if (i === typed.length) {
+        s.classList.add('current');
+      }
+    });
+  }
+
+  function calcWPM(elapsed) {
+    // Gross WPM: total keystrokes / 5 / minutes elapsed
+    const minutes = elapsed / 60000;
+    if (minutes < 0.001) return 0;
+    return Math.round((totalTyped / 5) / minutes);
+  }
+
+  function calcAccuracy() {
+    if (totalTyped === 0) return 100;
+    return Math.round(((totalTyped - errors) / totalTyped) * 100);
+  }
+
+  function tickTimer() {
+    const elapsed = performance.now() - startTime;
+    const remaining = Math.max(0, Math.ceil(60 - elapsed / 1000));
+    getTimer().textContent = remaining;
+    // Update live WPM
+    currentWPM = calcWPM(elapsed);
+    getWPMEl().textContent = currentWPM;
+    // Update accuracy
+    getAccEl().textContent = calcAccuracy();
+    if (remaining <= 0) finish();
+  }
+
+  function finish() {
+    clearInterval(timerInt);
+    state = 'result';
+    const elapsed = Math.min(performance.now() - startTime, 60000);
+    wpm = calcWPM(elapsed);
+    const acc = calcAccuracy();
+    GameState.add('typing', wpm);
+
+    // Hide active, show results
+    document.getElementById('typing-active-view').style.display = 'none';
+    const results = document.getElementById('typing-results');
+    results.style.display = 'block';
+    document.getElementById('typing-results-wpm').textContent = wpm;
+    document.getElementById('tr-accuracy').textContent = acc + '%';
+    document.getElementById('tr-chars').textContent = totalTyped - errors;
+    document.getElementById('tr-errors').textContent = errors;
+
+    // Notify scene of low WPM (slow typing ends)
+    if (sm) sm.userData.wpmNorm = 0;
+  }
+
+  function handleInput() {
+    if (state !== 'active') return;
+    const input = getInput();
+    const newTyped = input.value;
+
+    if (newTyped.length > typed.length) {
+      // Character was added
+      totalTyped++;
+      const idx = newTyped.length - 1;
+      if (newTyped[idx] !== text[idx]) errors++;
+    }
+
+    typed = newTyped;
+
+    // Clamp to text length
+    if (typed.length >= text.length) {
+      typed = typed.slice(0, text.length);
+      input.value = typed;
+      finish();
+      return;
+    }
+
+    updateChars();
+
+    // Feed WPM to scene for wave intensity
+    if (sm) sm.userData.wpmNorm = Math.min(currentWPM / 100, 1.5);
+  }
+
+  function focusInput() {
+    if (state === 'idle') start();
+    else getInput().focus();
+  }
+
+  function start() {
+    state     = 'active';
+    text      = pickText();
+    typed     = '';
+    errors    = 0;
+    totalTyped= 0;
+    startTime = performance.now();
+
+    document.getElementById('typing-active-view').style.display = 'flex';
+    document.getElementById('typing-results').style.display     = 'none';
+    document.getElementById('typing-idle-view').style.display   = 'none';
+
+    const box = document.getElementById('typing-text-box');
+    box.classList.add('active');
+    getOverlay().style.opacity = '0';
+    setTimeout(() => { getOverlay().style.display = 'none'; }, 300);
+
+    buildChars();
+    getInput().value = '';
+    getInput().focus();
+
+    timerInt = setInterval(tickTimer, 100);
+  }
+
+  function init() {
+    sm = new SceneManager();
+    sm.create('typing-canvas', (s) => {
+      // Wave mesh — PlaneGeometry with many segments
+      const geo = new THREE.PlaneGeometry(30, 6, 120, 30);
+      const mat = new THREE.MeshPhongMaterial({
+        color: 0x3B82F6,
+        emissive: 0x3B82F6,
+        emissiveIntensity: 0.15,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.45
+      });
+      const wave = new THREE.Mesh(geo, mat);
+      wave.rotation.x = -0.2;
+      wave.position.z = -2;
+      s.scene.add(wave);
+      s.userData.wave = wave;
+      s.userData.geo  = geo;
+      s.userData.wpmNorm = 0;
+
+      // Second wave (offset)
+      const geo2 = new THREE.PlaneGeometry(30, 6, 80, 20);
+      const mat2 = new THREE.MeshPhongMaterial({
+        color: 0x60A5FA,
+        emissive: 0x3B82F6,
+        emissiveIntensity: 0.1,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.25
+      });
+      const wave2 = new THREE.Mesh(geo2, mat2);
+      wave2.rotation.x = -0.2;
+      wave2.position.z = -4;
+      wave2.position.y = -3;
+      s.scene.add(wave2);
+      s.userData.wave2 = wave2;
+      s.userData.geo2  = geo2;
+    });
+
+    sm.animate((t, s) => {
+      const intensity = s.userData.wpmNorm || 0;
+      const speed = 1.5 + intensity * 3;
+      const amp   = 0.3 + intensity * 1.2;
+
+      // Deform primary wave
+      const pos = s.userData.geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        pos.setZ(i,
+          Math.sin(x * 0.5 + t * speed) * amp * 0.5 +
+          Math.sin(x * 0.3 - t * speed * 0.7 + y * 0.4) * amp * 0.3
+        );
+      }
+      pos.needsUpdate = true;
+
+      // Deform secondary wave
+      const pos2 = s.userData.geo2.attributes.position;
+      for (let i = 0; i < pos2.count; i++) {
+        const x = pos2.getX(i);
+        pos2.setZ(i, Math.sin(x * 0.4 + t * speed * 0.8 + 1.5) * amp * 0.4);
+      }
+      pos2.needsUpdate = true;
+
+      // Gently update emissive with intensity
+      if (s.userData.wave) {
+        s.userData.wave.material.emissiveIntensity = lerp(
+          s.userData.wave.material.emissiveIntensity,
+          0.15 + intensity * 0.5, 0.05
+        );
+      }
+
+      // Slowly decay wpmNorm when not typing
+      if (s.userData.wpmNorm > 0) s.userData.wpmNorm *= 0.995;
+    });
+
+    const input = getInput();
+    input.addEventListener('input', handleInput);
+    input.addEventListener('keydown', () => {
+      if (state === 'idle') start();
+    });
+    document.getElementById('typing-reset-btn').onclick = reset;
+  }
+
+  function reset() {
+    clearInterval(timerInt);
+    state = 'idle';
+    typed = ''; totalTyped = 0; errors = 0; wpm = 0;
+
+    document.getElementById('typing-active-view').style.display = 'flex';
+    document.getElementById('typing-results').style.display     = 'none';
+    document.getElementById('typing-idle-view').style.display   = 'none';
+
+    getTimer().textContent = '60';
+    getWPMEl().textContent = '0';
+    getAccEl().textContent = '100';
+
+    const box = document.getElementById('typing-text-box');
+    box.classList.remove('active');
+    getOverlay().style.display = '';
+    getOverlay().style.opacity = '';
+
+    getChars().innerHTML = '';
+    getInput().value = '';
+
+    if (sm) sm.userData.wpmNorm = 0;
+  }
+
+  function destroy() {
+    clearInterval(timerInt);
+    if (sm) { sm.destroy(); sm = null; }
+  }
+
+  return { init, start, reset, destroy, focusInput };
+})();
+
+/* ============================================================
+   SECTION 6: AIM TEST
+   ============================================================ */
+
+const AimTest = (() => {
+  const TOTAL_TARGETS = 30;
+  let state        = 'idle';   // idle | active | result
+  let clickCount   = 0;
+  let clickTimes   = [];
+  let lastClickT   = 0;
+  let currentTarget= null;
+  let sm           = null;
+  let missCount    = 0;
+
+  function getArena()   { return document.getElementById('aim-arena'); }
+  function getOverlay() { return document.getElementById('aim-arena-overlay'); }
+
+  function updateMeta() {
+    document.getElementById('aim-hits').textContent = `${clickCount}/${TOTAL_TARGETS}`;
+    const fill = document.getElementById('aim-progress-fill');
+    fill.style.width = `${(clickCount / TOTAL_TARGETS) * 100}%`;
+    if (clickTimes.length) {
+      const avg = Math.round(clickTimes.reduce((a, b) => a + b, 0) / clickTimes.length);
+      document.getElementById('aim-avg-time').textContent = avg + 'ms';
+      // Score: base points per hit minus penalty for time taken
+      const score = Math.round(clickTimes.reduce((sum, t) => sum + Math.max(0, 1000 - t) / 10, 0));
+      document.getElementById('aim-score').textContent = score;
+    }
+  }
+
+  function spawnTarget() {
+    const arena  = getArena();
+    const rect   = arena.getBoundingClientRect();
+    const size   = Math.round(rand(28, 72));  // px diameter
+    const margin = size / 2 + 8;
+
+    const target = document.createElement('div');
+    target.className = 'aim-target';
+    target.style.width  = size + 'px';
+    target.style.height = size + 'px';
+    target.style.left   = rand(margin, rect.width  - margin) + 'px';
+    target.style.top    = rand(margin, rect.height - margin) + 'px';
+    target.style.zIndex = '2';
+
+    target.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hitTarget(target);
+    }, { once: true });
+
+    arena.appendChild(target);
+    currentTarget = target;
+    lastClickT = performance.now();
+  }
+
+  function hitTarget(el) {
+    const elapsed = Math.round(performance.now() - lastClickT);
+    clickTimes.push(elapsed);
+    clickCount++;
+
+    // Animate target out
+    el.style.animation = 'target-out 0.15s ease-out forwards';
+    setTimeout(() => el.remove(), 150);
+    currentTarget = null;
+
+    // Particle burst in 3D
+    if (sm && sm.userData.burst) sm.userData.burst();
+
+    updateMeta();
+
+    if (clickCount >= TOTAL_TARGETS) {
+      setTimeout(finish, 200);
+    } else {
+      spawnTarget();
+    }
+  }
+
+  function handleArenaClick(e) {
+    if (state === 'idle') {
+      state = 'active';
+      getArena().classList.add('active');
+      getOverlay().style.opacity = '0';
+      setTimeout(() => { getOverlay().style.display = 'none'; }, 300);
+      spawnTarget();
+      return;
+    }
+    if (state !== 'active') return;
+    // Miss — show miss indicator
+    missCount++;
+    const arena = getArena();
+    const rect  = arena.getBoundingClientRect();
+    const flash = document.createElement('div');
+    flash.className = 'miss-flash';
+    flash.style.left = (e.clientX - rect.left) + 'px';
+    flash.style.top  = (e.clientY - rect.top)  + 'px';
+    arena.appendChild(flash);
+    setTimeout(() => flash.remove(), 400);
+  }
+
+  function finish() {
+    state = 'result';
+    if (currentTarget) { currentTarget.remove(); currentTarget = null; }
+
+    const avg  = Math.round(clickTimes.reduce((a, b) => a + b, 0) / clickTimes.length);
+    const best = Math.min(...clickTimes);
+    const total= Math.round(clickTimes.reduce((a, b) => a + b, 0) / 1000 * 100) / 100;
+    const score= Math.round(clickTimes.reduce((sum, t) => sum + Math.max(0, 1000 - t) / 10, 0));
+
+    GameState.add('aim', score);
+
+    // Show results
+    getArena().style.display = 'none';
+    document.getElementById('aim-progress-bar') && (document.querySelector('.aim-progress-bar').style.display = 'none');
+    const res = document.getElementById('aim-results');
+    res.style.display = 'block';
+    res.style.textAlign = 'center';
+    document.getElementById('aim-results-score').textContent = score;
+    document.getElementById('ar-avg').textContent   = avg + 'ms';
+    document.getElementById('ar-best').textContent  = best + 'ms';
+    document.getElementById('ar-total').textContent = total + 's';
+  }
+
+  function init() {
+    sm = new SceneManager();
+    sm.create('aim-canvas', (s) => {
+      // Orbiting particle ring
+      const count   = 300;
+      const posArr  = new Float32Array(count * 3);
+      const radii   = [];
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2;
+        const r     = rand(4.5, 6.5);
+        radii.push({ r, angle, speed: rand(0.004, 0.012), phase: rand(0, Math.PI * 2) });
+        posArr[i*3]   = Math.cos(angle) * r;
+        posArr[i*3+1] = Math.sin(angle) * r;
+        posArr[i*3+2] = (Math.random() - 0.5) * 1.5;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+      const mat = new THREE.PointsMaterial({ color: 0xF59E0B, size: 0.1, sizeAttenuation: true, transparent: true, opacity: 0.85 });
+      const ring = new THREE.Points(geo, mat);
+      s.scene.add(ring);
+      s.userData.ring   = ring;
+      s.userData.radii  = radii;
+      s.userData.posArr = posArr;
+
+      // Inner ring (smaller)
+      const count2  = 150;
+      const posArr2 = new Float32Array(count2 * 3);
+      const radii2  = [];
+      for (let i = 0; i < count2; i++) {
+        const angle = (i / count2) * Math.PI * 2;
+        const r = rand(2, 3.5);
+        radii2.push({ r, angle, speed: rand(0.008, 0.02), phase: rand(0, Math.PI * 2) });
+        posArr2[i*3]   = Math.cos(angle) * r;
+        posArr2[i*3+1] = Math.sin(angle) * r;
+        posArr2[i*3+2] = (Math.random() - 0.5) * 0.8;
+      }
+      const geo2  = new THREE.BufferGeometry();
+      geo2.setAttribute('position', new THREE.BufferAttribute(posArr2, 3));
+      const mat2  = new THREE.PointsMaterial({ color: 0xFBBF24, size: 0.07, sizeAttenuation: true, transparent: true, opacity: 0.6 });
+      const ring2 = new THREE.Points(geo2, mat2);
+      s.scene.add(ring2);
+      s.userData.ring2   = ring2;
+      s.userData.radii2  = radii2;
+      s.userData.posArr2 = posArr2;
+
+      // Burst particles (hidden by default)
+      const bCount  = 60;
+      const bPosArr = new Float32Array(bCount * 3);
+      const bGeo    = new THREE.BufferGeometry();
+      bGeo.setAttribute('position', new THREE.BufferAttribute(bPosArr, 3));
+      const bMat    = new THREE.PointsMaterial({ color: 0xFCD34D, size: 0.25, transparent: true, opacity: 0 });
+      const burst   = new THREE.Points(bGeo, bMat);
+      s.scene.add(burst);
+      s.userData.burst  = () => {
+        for (let i = 0; i < bCount; i++) {
+          bPosArr[i*3]   = 0; bPosArr[i*3+1] = 0; bPosArr[i*3+2] = 0;
+        }
+        bGeo.attributes.position.needsUpdate = true;
+        bMat.opacity = 1;
+        s.userData.burstVels = Array.from({length: bCount}, () => new THREE.Vector3(rand(-0.4,0.4), rand(-0.4,0.4), rand(-0.3,0.3)));
+        s.userData.bursting  = true;
+      };
+      s.userData.bPosArr = bPosArr;
+      s.userData.bGeo    = bGeo;
+      s.userData.bMat    = bMat;
+    });
+
+    sm.animate((t, s) => {
+      // Orbit ring 1
+      const r1 = s.userData.radii;
+      const p1 = s.userData.posArr;
+      if (r1) {
+        for (let i = 0; i < r1.length; i++) {
+          r1[i].angle += r1[i].speed * 0.016;
+          p1[i*3]   = Math.cos(r1[i].angle) * r1[i].r;
+          p1[i*3+1] = Math.sin(r1[i].angle) * r1[i].r;
+          p1[i*3+2] = Math.sin(t * 2 + r1[i].phase) * 0.5;
+        }
+        s.userData.ring.geometry.attributes.position.needsUpdate = true;
+      }
+      // Orbit ring 2 (counter-rotate)
+      const r2 = s.userData.radii2;
+      const p2 = s.userData.posArr2;
+      if (r2) {
+        for (let i = 0; i < r2.length; i++) {
+          r2[i].angle -= r2[i].speed * 0.016;
+          p2[i*3]   = Math.cos(r2[i].angle) * r2[i].r;
+          p2[i*3+1] = Math.sin(r2[i].angle) * r2[i].r;
+        }
+        s.userData.ring2.geometry.attributes.position.needsUpdate = true;
+      }
+      // Burst animation
+      if (s.userData.bursting) {
+        const bp = s.userData.bPosArr;
+        const bv = s.userData.burstVels;
+        for (let i = 0; i < 60; i++) {
+          bp[i*3]   += bv[i].x;
+          bp[i*3+1] += bv[i].y;
+          bp[i*3+2] += bv[i].z;
+          bv[i].multiplyScalar(0.93);
+        }
+        s.userData.bGeo.attributes.position.needsUpdate = true;
+        s.userData.bMat.opacity *= 0.96;
+        if (s.userData.bMat.opacity < 0.01) {
+          s.userData.bursting  = false;
+          s.userData.bMat.opacity = 0;
+        }
+      }
+    });
+
+    document.getElementById('aim-reset-btn').onclick = reset;
+  }
+
+  function reset() {
+    state = 'idle'; clickCount = 0; clickTimes = []; missCount = 0;
+    currentTarget = null;
+    document.querySelectorAll('.aim-target, .miss-flash').forEach(el => el.remove());
+    document.getElementById('aim-hits').textContent     = '0/30';
+    document.getElementById('aim-avg-time').textContent = '—';
+    document.getElementById('aim-score').textContent    = '0';
+    document.getElementById('aim-results').style.display = 'none';
+    document.getElementById('aim-progress-fill').style.width = '0%';
+    const arena = getArena();
+    arena.style.display = '';
+    arena.classList.remove('active');
+    document.querySelector('.aim-progress-bar') && (document.querySelector('.aim-progress-bar').style.display = '');
+    getOverlay().style.display = '';
+    getOverlay().style.opacity = '';
+    getOverlay().textContent = 'Click to Start';
+  }
+
+  function destroy() {
+    if (sm) { sm.destroy(); sm = null; }
+  }
+
+  return { init, handleArenaClick, reset, destroy };
+})();
+
+/* ============================================================
+   SECTION 7: SEQUENCE TEST
+   ============================================================ */
+
+const SequenceTest = (() => {
+  let state       = 'idle';   // idle | showing | input | result
+  let level       = 3;
+  let sequence    = [];
+  let playerInput = [];
+  let maxLevel    = 0;
+  let showTimeout = null;
+  let sm          = null;
+  let baseDelay   = 700;  // ms per step, decreases with level
+
+  function getBtns()    { return document.querySelectorAll('.seq-btn'); }
+  function getStatus()  { return document.getElementById('seq-status'); }
+  function getLevelEl() { return document.getElementById('seq-level'); }
+
+  function setStatus(msg, color) {
+    const el = getStatus();
+    el.textContent = msg;
+    el.style.color = color || 'var(--muted)';
+  }
+
+  function updateProgress() {
+    const prog = document.getElementById('seq-progress');
+    prog.innerHTML = '';
+    for (let i = 0; i < level; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'seq-dot' + (i < playerInput.length ? ' filled' : '');
+      prog.appendChild(dot);
+    }
+  }
+
+  function lightBtn(idx, duration) {
+    return new Promise(res => {
+      const btns = getBtns();
+      btns[idx].classList.add('lit');
+      // Pulse icosahedron in 3D scene
+      if (sm && sm.userData.pulse) sm.userData.pulse(idx);
+      setTimeout(() => {
+        btns[idx].classList.remove('lit');
+        res();
+      }, duration);
+    });
+  }
+
+  async function playSequence() {
+    state = 'showing';
+    disableBtns(true);
+    setStatus('Watch the sequence…', 'var(--sequence)');
+
+    const delay = Math.max(300, baseDelay - (level - 3) * 30);
+    const gap   = Math.max(80, 200 - (level - 3) * 10);
+
+    for (let i = 0; i < sequence.length; i++) {
+      await new Promise(r => setTimeout(r, i === 0 ? 400 : gap));
+      await lightBtn(sequence[i], delay);
+    }
+
+    await new Promise(r => setTimeout(r, 300));
+    state = 'input';
+    disableBtns(false);
+    playerInput = [];
+    updateProgress();
+    setStatus('Your turn — repeat the sequence', 'var(--text)');
+  }
+
+  function disableBtns(disabled) {
+    getBtns().forEach(b => { b.disabled = disabled; });
+  }
+
+  function generateSequence() {
+    sequence = Array.from({ length: level }, () => Math.floor(Math.random() * 4));
+  }
+
+  function handleBtnClick(idx) {
+    if (state !== 'input') return;
+    playerInput.push(idx);
+    lightBtn(idx, 250);
+    updateProgress();
+
+    const pos = playerInput.length - 1;
+    if (playerInput[pos] !== sequence[pos]) {
+      // Wrong button
+      state = 'result';
+      disableBtns(true);
+      setStatus('Wrong! Sequence failed.', 'var(--error)');
+      showResults();
+      return;
+    }
+
+    if (playerInput.length === sequence.length) {
+      // Level complete
+      level++;
+      maxLevel = Math.max(maxLevel, level - 1);
+      getLevelEl().textContent = level;
+      disableBtns(true);
+      setStatus('Correct! Level up!', 'var(--reaction)');
+      GameState.add('sequence', level - 1);
+      setTimeout(() => {
+        generateSequence();
+        playSequence();
+      }, 800);
+    }
+  }
+
+  function showResults() {
+    document.getElementById('seq-results').style.display = 'block';
+    document.getElementById('seq-start-btn').style.display = 'none';
+    document.getElementById('seq-results-level').textContent = maxLevel || (level - 1);
+    setStatus('');
+    GameState.add('sequence', maxLevel || (level - 1));
+  }
+
+  function start() {
+    level    = 3;
+    maxLevel = 0;
+    sequence = [];
+    playerInput = [];
+    document.getElementById('seq-results').style.display = 'none';
+    document.getElementById('seq-start-btn').style.display = 'none';
+    getLevelEl().textContent = level;
+    generateSequence();
+    playSequence();
+  }
+
+  function init() {
+    sm = new SceneManager();
+    sm.create('sequence-canvas', (s) => {
+      // Glowing icosahedron
+      const geo = new THREE.IcosahedronGeometry(3.5, 1);
+      const mat = new THREE.MeshPhongMaterial({
+        color: 0x8B5CF6,
+        emissive: 0x8B5CF6,
+        emissiveIntensity: 0.4,
+        transparent: true,
+        opacity: 0.55,
+        shininess: 120
+      });
+      const ico = new THREE.Mesh(geo, mat);
+      s.scene.add(ico);
+
+      // Wireframe overlay
+      const wmat = new THREE.MeshBasicMaterial({
+        color: 0xA78BFA,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.35
+      });
+      const wico = new THREE.Mesh(geo.clone(), wmat);
+      s.scene.add(wico);
+
+      s.userData.ico  = ico;
+      s.userData.wico = wico;
+      s.userData.pulseVal = 0;
+      s.userData.pulseColors = [0x8B5CF6, 0x3B82F6, 0x10B981, 0xF59E0B];
+
+      // Pulse function — called per sequence step
+      s.userData.pulse = (idx) => {
+        const col = s.userData.pulseColors[idx];
+        ico.material.color.setHex(col);
+        ico.material.emissive.setHex(col);
+        s.userData.pulseVal = 2.5;
+      };
+
+      // Outer glow sphere
+      const glowGeo = new THREE.SphereGeometry(4.5, 24, 16);
+      const glowMat = new THREE.MeshBasicMaterial({
+        color: 0x8B5CF6,
+        transparent: true,
+        opacity: 0,
+        side: THREE.BackSide
+      });
+      const glow = new THREE.Mesh(glowGeo, glowMat);
+      s.scene.add(glow);
+      s.userData.glow    = glow;
+      s.userData.glowMat = glowMat;
+    });
+
+    sm.animate((t, s) => {
+      const ico  = s.userData.ico;
+      const wico = s.userData.wico;
+      if (!ico) return;
+
+      ico.rotation.x  += 0.005;
+      ico.rotation.y  += 0.007;
+      wico.rotation.x  = ico.rotation.x + 0.01 * Math.sin(t);
+      wico.rotation.y  = ico.rotation.y;
+
+      // Pulse decay
+      if (s.userData.pulseVal > 0) {
+        s.userData.pulseVal *= 0.94;
+        ico.material.emissiveIntensity = 0.4 + s.userData.pulseVal;
+        s.userData.glowMat.opacity     = 0.08 + s.userData.pulseVal * 0.06;
+        ico.scale.setScalar(1 + s.userData.pulseVal * 0.04);
+      } else {
+        ico.material.emissiveIntensity = lerp(ico.material.emissiveIntensity, 0.4, 0.05);
+        // Restore base violet color
+        ico.material.color.lerp(new THREE.Color(0x8B5CF6), 0.03);
+        ico.material.emissive.lerp(new THREE.Color(0x8B5CF6), 0.03);
+        ico.scale.lerp(new THREE.Vector3(1,1,1), 0.1);
+        s.userData.glowMat.opacity = lerp(s.userData.glowMat.opacity, 0, 0.05);
+      }
+
+      // Gentle floating bob
+      ico.position.y  = Math.sin(t * 0.7) * 0.3;
+      wico.position.y = ico.position.y;
+    });
+
+    document.getElementById('sequence-reset-btn').onclick = reset;
+  }
+
+  function reset() {
+    clearTimeout(showTimeout);
+    level = 3; maxLevel = 0; sequence = []; playerInput = [];
+    state = 'idle';
+    disableBtns(true);
+    getLevelEl().textContent = level;
+    setStatus('Press Start to begin');
+    document.getElementById('seq-progress').innerHTML = '';
+    document.getElementById('seq-results').style.display = 'none';
+    document.getElementById('seq-start-btn').style.display = '';
+  }
+
+  function destroy() {
+    clearTimeout(showTimeout);
+    if (sm) { sm.destroy(); sm = null; }
+  }
+
+  return { init, start, handleBtnClick, reset, destroy };
+})();
+
+/* ============================================================
+   SECTION 8: ROUTER / NAVIGATION
+   ============================================================ */
+
+const Router = (() => {
+  let current  = 'dashboard';
+  let activeTest = null;
+
+  const tests = {
+    reaction: ReactionTest,
+    typing:   TypingTest,
+    aim:      AimTest,
+    sequence: SequenceTest
+  };
+
+  function go(screenId) {
+    // Destroy current test if leaving one
+    if (activeTest && tests[activeTest]) {
+      tests[activeTest].destroy();
+      tests[activeTest] = null;
+      // Re-assign fresh objects to restore them later
+      tests.reaction = ReactionTest;
+      tests.typing   = TypingTest;
+      tests.aim      = AimTest;
+      tests.sequence = SequenceTest;
+    }
+
+    // Hide all screens
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+
+    // Show target screen
+    const el = document.getElementById(screenId);
+    if (!el) return;
+    el.classList.add('active');
+    current = screenId;
+
+    // Init the test if we're entering one
+    if (screenId !== 'dashboard' && tests[screenId]) {
+      activeTest = screenId;
+      // Use a tick delay so the screen transition renders first
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          tests[screenId].init();
+        });
+      });
+    } else {
+      activeTest = null;
+      GameState.updateDashboard();
+    }
+  }
+
+  return { go, current: () => current };
+})();
+
+/* ============================================================
+   SECTION 9: INITIALIZATION
+   ============================================================ */
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Ensure dashboard is shown first
+  Router.go('dashboard');
+
+  // Keyboard shortcut to go back from any test
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const cur = Router.current();
+      if (cur !== 'dashboard') Router.go('dashboard');
+    }
+  });
+});
+</script>
+</body>
+</html>
